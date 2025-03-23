@@ -1,5 +1,5 @@
 # You can set the name of the .gb ROM file here
-PROJECTNAME    	= MyProject
+PROJECTNAME    	= Minesweeper
 SRCDIR      	= src
 LIBDIR      	= libs
 OBJDIR      	= obj

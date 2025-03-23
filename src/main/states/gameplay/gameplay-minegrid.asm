@@ -3,6 +3,68 @@ INCLUDE "src/main/states/gameplay/constants.inc"
 
 SECTION "GameplayMineGrid", ROM0
 
+; Suppose a is a grid index. The possible adjacent grid indexes are:
+;     a-17  a-16  a-15
+;     a-1   a     a+1
+;     a+15  a+16  a+17
+;
+; depending on a's position in the grid, some of these might be out of bounds and should be excluded.
+; squares in the row above are not adjacent if subtracting 16 from a results in a carry
+; squares in the row below are not adjacent if adding 16 to a results in a carry
+; squares in the column to the left are not adjacent if a is a multiple of 16
+; squares in the column to the right are not adjacent if a+1 is a multiple of 16
+
+; An adjacency bitmask uses one bit for each neighbor in this order:
+; UL, U, UR, R, DR, D, DL, L
+; neighbors that are in-bounds are 1, neighbors out of bounds are 0.
+
+; input: a is grid index
+; output: a is still the grid index, b is the bit mask of that grid square
+; destroys b, c
+GetAdjacentSquaresBitMask::
+    ld b, $FF    ; initialize bit mask: all 1s
+    ld c, a      ; store copy of a (grid index) so we can keep destroying it
+
+GetAdjacentSquaresBitMaskCheckTop: ; top row -> turn off the three neighbors above
+    sub a, 16
+    jp nc, GetAdjacentSquaresBitMaskCheckBottom
+    ; update bit mask
+    ld a, b
+    and MASK_ADJACENCY_CLEAR_ROW_ABOVE_AND
+    ld b, a
+
+GetAdjacentSquaresBitMaskCheckBottom: ; bottom row -> turn off the three neighbors below
+    ld a, c
+    sub a, 240
+    jp c, GetAdjacentSquaresBitMaskCheckLeft
+    ; update bit mask
+    ld a, b
+    and MASK_ADJACENCY_CLEAR_ROW_BELOW_AND
+    ld b, a
+
+GetAdjacentSquaresBitMaskCheckLeft: ; leftmost column -> turn off the three neighbors to the left
+    ld a, c
+    and %00001111  ; is a a multiple of 16?
+    jp nz, GetAdjacentSquaresBitMaskCheckRight
+    ; update bit mask
+    ld a, b
+    and MASK_ADJACENCY_CLEAR_COL_LEFT_AND
+    ld b, a
+
+GetAdjacentSquaresBitMaskCheckRight: ; rightmost column -> turn off the three neighbors to the right
+    ld a, c
+    add 1
+    and %00001111  ; is a+1 a multiple of 16?
+    jp nz, GetAdjacentSquaresBitMaskCheckRightDone
+    ; update bit mask
+    ld a, b
+    and MASK_ADJACENCY_CLEAR_COL_RIGHT_AND
+    ld b, a
+GetAdjacentSquaresBitMaskCheckRightDone:
+    ld a, c  ; restore grid index
+    ret
+
+
 ; input:
   ; hl is the address in wGridData of a space's grid data
   ; e is the offset within wGridData of an adjacent space's data
@@ -26,51 +88,10 @@ IncBombCountAtOffsetFromGridSpace:
 ;   destroys bc, e
 IncrementAdjacentBombCounts:
 
-    ;     a-17  a-16  a-15
-    ;     a-1   a     a+1
-    ;     a+15  a+16  a+17
-    ;
-    ; spots below/above are adjacent unless adding/subtracting 16 carries
-    ; other spots may not be adjacent even if adding the offset doesn't carry
+    call GetAdjacentSquaresBitMask
+    ; a is still the grid index
+    ; b is the bit mask
 
-    ; Use one bit to track each neighbor in this order:
-    ; UL, U, UR, R, DR, D, DL, L
-    ld b, $FF
-    ld c, a  ; store copy of a so we can keep destroying it
-
-IncBombCountCheckTop: ; top row -> turn off the three neighbors above
-    sub a, 16
-    jp nc, IncBombCountCheckBottom
-    ld a, b
-    and %00011111
-    ld b, a
-
-IncBombCountCheckBottom: ; bottom row -> turn off the three neighbors below
-    ld a, c
-    sub a, 240
-    jp c, IncBombCountCheckLeft
-    ld a, b
-    and %11110001
-    ld b, a
-
-IncBombCountCheckLeft: ; leftmost column -> turn off the three neighbors to the left
-    ld a, c
-    and %00001111  ; is a a multiple of 16?
-    jp nz, IncBombCountCheckRight
-    ld a, b
-    and %01111100
-    ld b, a
-
-IncBombCountCheckRight: ; rightmost column -> turn off the three neighbors to the right
-    ld a, c
-    add 1
-    and %00001111  ; is a+1 a multiple of 16?
-    jp nz, ApplyIncrements
-    ld a, b
-    and %11000111
-    ld b, a
-
-ApplyIncrements:
     ld hl, wGridData
     ld d, b  ; store the bitmask
     ld b, 0  ; now bc = grid index
